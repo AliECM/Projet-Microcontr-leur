@@ -1,0 +1,125 @@
+/*
+Ceci est le premier programe de notre projet de l'option microcontrôleur. 
+Il s'agit du programme qui contrôle l'arduino de station A et qui permet d'écrire les données du capteur sur la puce RFID  de l'utilisateur.
+Le programme de la station A est organisé de la manière suivante :
+Premièrement une partie initialisation qui inclus :
+-	La définition des variables (nom et type), exemple : le nom des pins de branchement de la carte Arduino :  les variables pour stocker les données du capteur de luminosité (nombre de lumen) …
+-	L’importation des bibliothèques(1) utilisés dans notre programme (exemple : la bibliothèque « MFRC522 »)
+-	Définitions des clés A & B permettant d’accéder aux données.
+Une deuxième partie appelée « loop » qui va :
+-	Détecter l’appui du bouton, si celui-ci est appuyé le programme récupère la valeur donnée par le capteur de luminosité.
+-	« Préparer les données » sous la bonne forme, c’est-à-dire organiser les données que l’on souhaite sous forme de bloc de 4 lignes (voir partie « fonctionnement RFID plus haut pour les explications)
+-	Détecter si une puce RFID est présente (on vérifie que cette puce est effectivement compatible avec le terminal de lecture/écriture que l’on utilise). Si la puce détectée est conforme on vient transférer les données.
+
+*/
+
+
+// Définition des Pins et variables utilisées
+
+int cap = A5;
+float val ;
+int bout = A1;
+int Bouton ;
+float Lum;
+int L1;
+int L2;
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN         9          
+#define SS_PIN          10          
+
+MFRC522 mfrc522(SS_PIN, RST_PIN);   // Creation de l'instance MFRC522
+
+MFRC522::MIFARE_Key key;            // Creation de la clé 
+
+void setup() {
+
+    Serial.begin(9600); // Initialisation du port série 9600
+    SPI.begin();        // Initialisation du port SPI bus
+    mfrc522.PCD_Init(); // Initialisation de la carte MFRC522
+    
+    // Préparation de la clé FFFFFFFFFFFF (qui est la clé par defaut sur toutes les puces
+    for (byte i = 0; i < 6; i++) {
+        key.keyByte[i] = 0xFF;
+    }
+
+    Serial.println(F("La clé A et B sera la suivante "));
+    dump_byte_array(key.keyByte, MFRC522::MF_KEY_SIZE);
+
+    Serial.println(F("ATTENTION : les données seront écrites sur le secteur 1"));
+}
+
+
+void loop() {
+
+  // Détection du bouton 
+  Bouton = analogRead(bout);         // on récupère la tension en sortie de l'intérupteur 
+  if (Bouton > 800)                  // si le bouton est appuyé on enregistre la valeur du capteur 
+  {
+  val = analogRead(cap);
+  Lum = 6*val/1.023;
+  Serial.println(Lum);              // Conversion de la valeur en tension d'entrée (0 à 5V --> valeur de 0 à 1023) en valeur en Lum (règle de 3) 0 à 6000
+  L1 = floor(Lum/100);              // séparation des deux premiers chiffres et des deux derniers.
+  L2 = floor(Lum-L1*100);            
+  
+
+  
+  }
+  
+      // Recherche de nouvelle carte
+    if ( ! mfrc522.PICC_IsNewCardPresent())
+        return;
+    // Selection de l'une des cartes
+    if ( ! mfrc522.PICC_ReadCardSerial())
+        return;
+
+    // Affiche les détails de la carte 
+    Serial.print(F("numéro UID (identidfiant) du badge"));
+    dump_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
+    Serial.println();
+
+    byte sector         = 1;                                               // définition du secteur 
+    byte blockAddr      = 4;                                               // définion de l'adresse du block
+    byte dataBlock[]    = {
+        0x00, 0x00, 0x00, 0x00, //  1,  2,   3,  4,
+        0x00, 0x00, 0x00, 0x00, //  5,  6,   7,  8,
+        0x00, 0x00, 0x00, 0x00, //  9, 10, 255, 11,
+        0x00, 0x00, L1, L2  // 12, 13, 14, 15                              // définition des données qui seront écrites
+    } ;
+    
+    byte trailerBlock   = 7;                                               // numéro du bloc
+    MFRC522::StatusCode status;
+    byte buffer[18];
+    byte size = sizeof(buffer);
+    
+     // Authentification en clé A
+    Serial.println(F("Authentification de la clé A"));
+    status = (MFRC522::StatusCode) mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
+    if (status != MFRC522::STATUS_OK) {
+        Serial.print(F("Echec de l'authentification :"));
+        Serial.println(mfrc522.GetStatusCodeName(status));
+        return;
+    }
+       // Ecriture du block
+    Serial.print(F("Ecriture des données dans les blocks ")); Serial.print(blockAddr);
+    Serial.println(F(" ..."));
+    dump_byte_array(dataBlock, 16); Serial.println();
+    status = (MFRC522::StatusCode) mfrc522.MIFARE_Write(blockAddr, dataBlock, 16);
+    if (status != MFRC522::STATUS_OK) {
+        Serial.print(F("Echec de l'écriture"));
+        Serial.println(mfrc522.GetStatusCodeName(status));
+    }
+    Serial.println();
+    // Fin de lecture 
+    mfrc522.PICC_HaltA();
+    mfrc522.PCD_StopCrypto1();
+    delay(3000);
+}
+// Convertisseur byte --> HEXA
+void dump_byte_array(byte *buffer, byte bufferSize) {
+    for (byte i = 0; i < bufferSize; i++) {
+        Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+        Serial.print(buffer[i], HEX);
+    }
+}
