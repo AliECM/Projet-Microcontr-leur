@@ -1,0 +1,97 @@
+/*
+Ceci est le deuxième programme de notre projet pour l'option microcontrôleur
+Il s'agit du programme de la station B chargée de récupérer les données de la puce RFID de l'utilisateur afin de les afficher sur l'écran de l'odinateur.
+Le programme de la station B est organisé de la station suivante :
+Premièrement une partie initialisation qui inclus :
+-	La définition des variables (nom et type), exemple : le nom des pins de branchement de la carte Arduino, les variables pour stocker les données récupérées, définition du port de communication pour le port série (pour afficher les résultats) …
+-	L’importation des bibliothèques(1) utilisés dans notre programme (exemple : la bibliothèque « MFRC522 »)
+-	Définitions des clés A & B permettant d’accéder aux données de la puce
+Une deuxième partie appelée « loop » qui va :
+-	Détecter si une puce RFID est présente (on vérifie que cette puce est effectivement compatible avec le terminal de lecture/écriture que l’on utilise). Si la puce détectée est conforme on vient  récupérer les données stockées dessus afin de les afficher sur l’écran de l’ordinateur (avec l’aide du port de communication série).
+
+*/
+
+//importation des bibliothèques 
+#include <SPI.h>
+#include <MFRC522.h>
+
+
+// Définition des Pins d'entrées
+#define RST_PIN         9
+#define SS_PIN          10
+
+// Creation des classes importées des bibliothèques
+MFRC522 mfrc522(SS_PIN, RST_PIN);   // Creation d'une insatance MFRC522 instance.
+MFRC522::MIFARE_Key key;            // Creation de la clé
+
+void setup() {
+    Serial.begin(9600); // initialisation du port série 9600 pour la communication
+    while (!Serial);    // ne fait rien si le port série n'est pas ouvert
+    SPI.begin();        // initialisation du SPI bus (initialisation de la communication)
+    mfrc522.PCD_Init(); // Initialisation de la carte MFRC522 card
+
+    //creation de la clé d'authentification
+    for (byte i = 0; i < 6; i++) {
+        key.keyByte[i] = 0xFF; //la clé A et la clé B utilisé pour écrire/lire le badge sera FFFFFFFFFFFF  (qui est la clé par défaut 
+    }
+    Serial.println("Le lecteur est prêt pour la lecture, veuillez approcher le badge."); // afficher que le matériel est prêt pour l'utilisation
+}
+
+void loop() {
+    // recherche d'une nouvelle carte
+    if ( ! mfrc522.PICC_IsNewCardPresent())
+        return;
+
+    if ( ! mfrc522.PICC_ReadCardSerial())
+        return;
+
+    MFRC522::PICC_Type piccType = mfrc522.PICC_GetType(mfrc522.uid.sak);
+
+    //On test la compatibilité de la carte
+    if (    piccType != MFRC522::PICC_TYPE_MIFARE_MINI
+        &&  piccType != MFRC522::PICC_TYPE_MIFARE_1K
+        &&  piccType != MFRC522::PICC_TYPE_MIFARE_4K) {
+        Serial.println(F("Ce programme fonctionne uniquement avec une carte MIFARE Classic. Votre carte n'est pas une MIFARE classic"));
+        return;
+    }
+
+    byte sector         = 1; //secteur utilisé
+    byte blockAddr      = 4; // le numéro du block utilisé
+    byte trailerBlock   = 7; // le numéro de la ligne utilisé
+    MFRC522::StatusCode status;          
+    byte buffer[18];     // creation de byte de donnée où l'information sera stockée
+    byte size = sizeof(buffer);     // on récupère la taille du byte         
+
+    //authentification en utilisant la clé A
+    status = (MFRC522::StatusCode) mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
+    if (status != MFRC522::STATUS_OK) {                                     // si l'authentifiation a échoué, on affiche l'échec sur le port série
+        Serial.print(F("Authentification à échoué :"));
+        Serial.println(mfrc522.GetStatusCodeName(status));
+        return;
+    }
+    
+    //Lecture des données sur la cartes
+    status = (MFRC522::StatusCode) mfrc522.MIFARE_Read(blockAddr, buffer, &size);
+    if (status != MFRC522::STATUS_OK) {                  // Si la lecture à échoué, l'afficher
+        Serial.print(F("Authentification à échoué :"));
+        Serial.println(mfrc522.GetStatusCodeName(status));
+    }
+    Serial.print(F("Les données ont été récupéré :"));                //  affichage des données récupérés (et qui nous intéresse) 
+    Serial.print(buffer[14]);
+    Serial.print(buffer[15]);
+    Serial.println();
+    
+    //Fin de lecture
+    mfrc522.PICC_HaltA();
+    mfrc522.PCD_StopCrypto1();
+
+}
+
+//defining helper : byte to hexadecimal value
+void dump_byte_array(byte *buffer, byte bufferSize) {
+    for (byte i = 0; i < bufferSize; i++) {
+        Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+        Serial.print(buffer[i], HEX);
+    }
+}
+//end of defining helper
